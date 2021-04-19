@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "delay.h"
+#include "common.h"
 
 int unic_num = 0;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -16,7 +17,7 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct thread_param
 {
-	clock_t begin;
+	time_t begin;
     int seconds_to_run;
     char* fifoname;
 };
@@ -24,9 +25,10 @@ struct thread_param
 struct fifo_arg{
     int op;
     char* filename;
-	clock_t begin;
+	time_t begin;
 	int seconds_to_run;
 };
+
 
 char ** get_info_from_fifo(const char *str, const char *delim)
 {
@@ -51,94 +53,102 @@ char ** get_info_from_fifo(const char *str, const char *delim)
     return res;
 }
 
-void stdout_from_fifo(char* argv[],char * operation){
-    fprintf(stdout,"%ld; ", time(0));
-    for (int i = 0; argv[i]; i++)
-        fprintf(stdout,"%s; ", argv[i]);
+void stdout_from_fifo(struct Message* msg,char * operation){
+    fprintf(stdout,"%ld; ", time(NULL));
+    fprintf(stdout,"%d; %d; %d; %ld; %d; ", msg->rid, msg->tskload, msg->pid, msg->tid,msg->tskres);
     fprintf(stdout,"%s \n", operation);
 }
 
-void read_from_fifo(char* private_fifo_name,clock_t begin, int time_out, char* client_request_args[5]){
+void read_from_fifo(char* private_fifo_name,time_t begin, int time_out, struct Message* request_msg ){
 	int np;
-    
-    while ((np = open(private_fifo_name, O_RDONLY)) < 0){
+
+
+	while ((np = open(private_fifo_name, O_RDONLY | O_NONBLOCK)) < 0){
         continue;
     }
 
-    char* buffer = "";
     int r;
     int seconds_elapsed = 0;
-    do{
-		r = read(np, buffer, 100);
-        seconds_elapsed = (double)((clock() - begin) / sysconf(_SC_CLK_TCK));
+
+	struct Message *msg = malloc(sizeof(struct Message));
+
+	do{
+		r = read(np, msg, sizeof(msg));
+        seconds_elapsed = time(NULL) - begin;
+        //the thread didn't receive an answer from the server in time
         if(seconds_elapsed > time_out){
-			stdout_from_fifo(client_request_args, "CLOSD");
+			stdout_from_fifo(request_msg, "CLOSD");
 			close(np);
             remove(private_fifo_name);
             return;
 		}
 	}while(r == 0);
     
-    //argv has the arguments from the server's answer
-    char ** server_answer_args = get_info_from_fifo(buffer," ");
-    int res = atoi(server_answer_args[4]);
 
-    if(res == -1){
-        stdout_from_fifo(server_answer_args,"CLOSD");
+	if(msg->tskres == -1){
+        stdout_from_fifo(msg,"CLOSD");
     }
     else{
-        stdout_from_fifo(server_answer_args,"GOTRS");
+        stdout_from_fifo(msg,"GOTRS");
     }
-    remove(private_fifo_name);
+	free(msg);
 	close(np);
 	return;
 }
 
 void* send_to_fifo(void* arg){
     struct fifo_arg *fifo_args = (struct fifo_arg *) arg;
-	int np;
-    char* argv[5];
-    
-    char* message = "";
+	int np = -1;
+	
 	pthread_t id_thread = pthread_self();
-	sprintf(message, "%d %d %ld %d\n", fifo_args->op, getpid(), id_thread,-1);
 
-    char* private_fifo_name = "";
-    sprintf(private_fifo_name, "/tmp/%d.%ld",getpid(), id_thread);
     
+    char* private_fifo_name = (char *) malloc(50 * sizeof(char));
+    sprintf(private_fifo_name, "/tmp/%d.%ld",getpid(), id_thread);
+
+	
     if (mkfifo(private_fifo_name,0666) < 0) {
         perror("mkfifo");
     }
 
-    pthread_mutex_lock(&mutex);
-    while ((np = open(fifo_args->filename, O_WRONLY)) < 0){
-        continue;
-    }
+	
+    struct Message* msg = malloc(sizeof(struct Message));
+    msg->tid = id_thread;
+    msg->tskload = fifo_args->op;
+    msg->pid = getpid();
+    msg->tskres = -1;
+
+
+	pthread_mutex_lock(&mutex);
+
+    np = open(fifo_args->filename, O_WRONLY | O_NONBLOCK);
+
+
 	unic_num++;
-    sprintf(argv[0], "%d", unic_num);
-    char* i = "";
-    sprintf(i,"%d ", unic_num);
-    strcat(i,message);
-    printf("%s \n", i);
-	write(np, i,strlen(i));
-    close(np);
+
+    msg->rid = unic_num;
+
+	write(np, &msg, sizeof(msg));
+
+	close(np);
 	pthread_mutex_unlock(&mutex);
+   
+    stdout_from_fifo(msg,"IWANT");
 
-	sprintf(argv[1], "%d", fifo_args->op);
-    sprintf(argv[2], "%d", getpid());
-    sprintf(argv[3], "%ld",id_thread);
-    argv[4] = "-1";
 
-    stdout_from_fifo(argv,"IWANT");
 
-    read_from_fifo(private_fifo_name,fifo_args->begin, fifo_args->seconds_to_run,argv);
+    read_from_fifo(private_fifo_name,fifo_args->begin, fifo_args->seconds_to_run,msg);
+    remove(private_fifo_name);
+	free(private_fifo_name);
+    free(msg);
+
 	pthread_exit(NULL);
-	 
 }
 
 void *thread_create(void* arg){
+
     struct thread_param *param = (struct thread_param *) arg;
-    pthread_t ids[20];
+    pthread_t ids[100];
     size_t num_of_threads = 0;
     struct fifo_arg fn;
     double seconds_elapsed = 0;
@@ -146,43 +156,67 @@ void *thread_create(void* arg){
     fn.filename = param->fifoname;
 	fn.begin = param->begin;
 	fn.seconds_to_run = param->seconds_to_run;
+    
+ 
+
 	while(seconds_elapsed < param->seconds_to_run){
-		fn.op = rand() % 9 + 1;
-		pthread_create(&ids[num_of_threads], NULL, send_to_fifo, &fn);
-        num_of_threads++;
-        seconds_elapsed = (double)((clock() - param->begin) / sysconf(_SC_CLK_TCK));
-		usleep(delay * 1000);
+		fn.op = rand() % 9 + 1; //carga da tarefa 
         
+	    pthread_create(&ids[num_of_threads], NULL, send_to_fifo, &fn);
+        num_of_threads++;
+        seconds_elapsed = time(NULL) - param->begin;
+        printf("seconds_elapsed: %f \n", seconds_elapsed);
+		//usleep(delay * 1000);
+
+        sleep(1);
 	}
+
     for(int i = 0; i< num_of_threads; i++) {
 	    pthread_join(ids[i], NULL);	
-	    
+	
 	}
+    
     pthread_exit(NULL);
 }
 
 
 int main(int argc, char* argv[]){
+   
+    time_t begin = time(NULL);
     srand(time(NULL));
-    clock_t begin = clock();
+    
     int seconds_to_run = atoi(argv[1]);
+    
     pthread_t c0;
     
-    char * fifoname = "";
-    strcpy(fifoname,"/tmp/");
-    strcat(fifoname,argv[2]);
     
+    char* fifoname = (char *) malloc(50 * sizeof(char));
+ 
+    
+    sprintf(fifoname,"/tmp/%s",argv[2]);
+
+
     if (mkfifo(fifoname,0666) < 0) {
         perror("mkfifo");
     }
-    
+ 
+     
     struct thread_param param;
     param.begin = begin;
     param.seconds_to_run = seconds_to_run;
     param.fifoname = fifoname;
-
+    
+    
     pthread_create(&c0, NULL, thread_create, &param);
+    
+    pthread_join(c0,NULL);
+
+ 
     remove(fifoname);
-    return 0;
+    
+	free(fifoname);
+
+	return 0;
+    
 }
 
