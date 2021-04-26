@@ -25,7 +25,6 @@ struct thread_param
 
 struct fifo_arg{
     int op;
-    char* filename;
 	time_t begin;
 	int seconds_to_run;
     int file_descriptor;
@@ -41,18 +40,19 @@ void stdout_from_fifo(struct Message* msg,char * operation){
 void read_from_fifo(char* private_fifo_name,time_t begin, int time_out, struct Message* request_msg ){
 	int np;
 
-	while ((np = open(private_fifo_name, O_RDONLY | O_NONBLOCK)) < 0){
+	while ((np = open(private_fifo_name, O_RDONLY)) < 0){
         continue;
     }
-
 
     int seconds_elapsed = 0;
 
 	struct Message *msg = malloc(sizeof(struct Message));
 	int r;
+
 	do{
 		r = read(np, msg, sizeof(struct Message));
         seconds_elapsed = time(NULL) - begin;
+        
         //the thread didn't receive an answer from the server in time
         if(seconds_elapsed > time_out){
 			stdout_from_fifo(request_msg, "GAVUP");
@@ -62,11 +62,13 @@ void read_from_fifo(char* private_fifo_name,time_t begin, int time_out, struct M
 		}
 	}while(r == 0);
 
+    //printf("msg->tskres: %d \n", msg->tskres);
 	if(msg->tskres == -1){
+        fifo_is_closed = true;
         stdout_from_fifo(request_msg,"CLOSD");
     }
     else{
-        stdout_from_fifo(request_msg,"GOTRS");
+        stdout_from_fifo(msg,"GOTRS");
     }
     
     remove(private_fifo_name);
@@ -77,7 +79,7 @@ void read_from_fifo(char* private_fifo_name,time_t begin, int time_out, struct M
 
 void* send_to_fifo(void* arg){
     struct fifo_arg *fifo_args = (struct fifo_arg *) arg;
-	int np = -1;
+	int np = fifo_args->file_descriptor;
 	
 	pthread_t id_thread = pthread_self();
 
@@ -94,24 +96,19 @@ void* send_to_fifo(void* arg){
     msg->pid = getpid();
     msg->tskres = -1;
 
-    np = open(fifo_args->filename, O_WRONLY);
-    if(np < 0){
-        printf("SERVER CLOSED FIFO \n");
-		fifo_is_closed = true;
-        remove(private_fifo_name);
-        free(private_fifo_name);
-		pthread_exit(NULL);
-    }
-
     pthread_mutex_lock(&mutex);
 	unic_num++;
     msg->rid = unic_num;
     pthread_mutex_unlock(&mutex);
-
     stdout_from_fifo(msg,"IWANT");
-	write(np, msg, sizeof(struct Message));
-
-	close(np);
+	int write_output = write(np, msg, sizeof(struct Message));
+    if(write_output < 0){
+        remove(private_fifo_name);
+        free(private_fifo_name);
+        fifo_is_closed = true;
+        free(msg);
+        pthread_exit(NULL);
+    } 
 
     read_from_fifo(private_fifo_name,fifo_args->begin, fifo_args->seconds_to_run,msg);
     
@@ -130,28 +127,26 @@ void *thread_create(void* arg){
     struct fifo_arg fn;
     double seconds_elapsed = 0;
     
-    fn.filename = param->fifoname;
+    fn.file_descriptor = open(param->fifoname, O_WRONLY);
+
 	fn.begin = param->begin;
 	fn.seconds_to_run = param->seconds_to_run;
     
 	while(seconds_elapsed < param->seconds_to_run){
-        if (fifo_is_closed){
-            printf("SERVER CLOSED FIFO \n");
-			break;
+        if (!fifo_is_closed){
+            fn.op = rand() % 9 + 1; //carga da tarefa 
+            pthread_create(&ids[num_of_threads], NULL, send_to_fifo, &fn);
+            num_of_threads++;
+            usleep(1000 * 50);
 		}
-		fn.op = rand() % 9 + 1; //carga da tarefa 
-	    pthread_create(&ids[num_of_threads], NULL, send_to_fifo, &fn);
-        num_of_threads++;
         seconds_elapsed = time(NULL) - param->begin;
-        printf("seconds_elapsed: %f \n", seconds_elapsed);
-		//usleep(delay * 1000);
-        usleep(1000 * 50);
+      
 	}
 
     for(int i = 0; i< num_of_threads; i++) {
 	    pthread_join(ids[i], NULL);	
 	}
-    
+    close(fn.file_descriptor);
     pthread_exit(NULL);
 }
 
@@ -187,7 +182,7 @@ int main(int argc, char* argv[]){
     pthread_join(c0,NULL);
     
 	free(fifoname);
-    printf("Client has finished running! \n");
+    //printf("Client has finished running! \n");
 	return 0;
     
 }
