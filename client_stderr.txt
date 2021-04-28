@@ -1,1 +1,1 @@
-mkfifo: File exists
+script.sh: line 54: ./c: cannot execute binary file: Exec format error
