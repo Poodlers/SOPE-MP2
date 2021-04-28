@@ -161,14 +161,7 @@ int main(int argc, char* argv[]){
     pthread_t c0;
     
     char* fifoname = (char *) malloc(50 * sizeof(char));
- 
-    
     sprintf(fifoname,"%s",argv[3]);
-
-    
-    if (mkfifo(fifoname,0666) < 0) {
-        perror("mkfifo");
-    }
     
      
     struct thread_param param;
