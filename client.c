@@ -151,7 +151,7 @@ void *thread_create(void* arg){
             num_of_threads++;
             usleep(1000 * 50);
 		}
-        
+        seconds_elapsed = time(NULL) - param->begin;
       
 	}
 
