@@ -132,21 +132,26 @@ void *thread_create(void* arg){
 	fn.begin = param->begin;
 	fn.seconds_to_run = param->seconds_to_run;
     
-	while(seconds_elapsed < param->seconds_to_run){
+    //wait until the server has opened the public fifo before starting request thread creation
+    while(seconds_elapsed < param->seconds_to_run){
         fn.file_descriptor = open(param->fifoname, O_WRONLY);
-        
         if(fn.file_descriptor == -1){
-            fifo_is_closed = true;
+            continue;
         }else{
-            fifo_is_closed = false;
+            break;
         }
+        seconds_elapsed = time(NULL) - param->begin;
+    }
+    
+
+	while(seconds_elapsed < param->seconds_to_run){
         if (!fifo_is_closed){
             fn.op = rand() % 9 + 1; //carga da tarefa 
             pthread_create(&ids[num_of_threads], NULL, send_to_fifo, &fn);
             num_of_threads++;
             usleep(1000 * 50);
 		}
-        seconds_elapsed = time(NULL) - param->begin;
+        
       
 	}
 
