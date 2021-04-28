@@ -127,12 +127,19 @@ void *thread_create(void* arg){
     struct fifo_arg fn;
     double seconds_elapsed = 0;
     
-    fn.file_descriptor = open(param->fifoname, O_WRONLY);
+    fn.file_descriptor = -1;
 
 	fn.begin = param->begin;
 	fn.seconds_to_run = param->seconds_to_run;
     
 	while(seconds_elapsed < param->seconds_to_run){
+        fn.file_descriptor = open(param->fifoname, O_WRONLY);
+        
+        if(fn.file_descriptor == -1){
+            fifo_is_closed = true;
+        }else{
+            fifo_is_closed = false;
+        }
         if (!fifo_is_closed){
             fn.op = rand() % 9 + 1; //carga da tarefa 
             pthread_create(&ids[num_of_threads], NULL, send_to_fifo, &fn);
@@ -163,7 +170,7 @@ int main(int argc, char* argv[]){
     char* fifoname = (char *) malloc(50 * sizeof(char));
     sprintf(fifoname,"%s",argv[3]);
     
-     
+         
     struct thread_param param;
     param.begin = begin;
     param.seconds_to_run = seconds_to_run;
