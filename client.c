@@ -32,9 +32,7 @@ struct fifo_arg{
 
 
 void stdout_from_fifo(struct Message* msg,char * operation){
-    fprintf(stdout,"%ld; ", time(NULL));
-    fprintf(stdout,"%d; %d; %d; %ld; %d; ", msg->rid, msg->tskload, msg->pid, msg->tid,msg->tskres);
-    fprintf(stdout,"%s \n", operation);
+    fprintf(stdout,"%ld; %d; %d; %d; %ld; %d; %s \n",time(NULL), msg->rid, msg->tskload, msg->pid, msg->tid,msg->tskres, operation);
 }
 
 void read_from_fifo(char* private_fifo_name,time_t begin, int time_out, struct Message* request_msg ){
