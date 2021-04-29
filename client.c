@@ -133,9 +133,8 @@ void *thread_create(void* arg){
     //wait until the server has opened the public fifo before starting request thread creation
     while(seconds_elapsed < param->seconds_to_run){
         fn.file_descriptor = open(param->fifoname, O_WRONLY);
-        if(fn.file_descriptor == -1){
-            continue;
-        }else{
+        
+        if(fn.file_descriptor != -1){
             break;
         }
         seconds_elapsed = time(NULL) - param->begin;
@@ -149,6 +148,13 @@ void *thread_create(void* arg){
             num_of_threads++;
             usleep(1000 * 50);
 		}
+        else{
+
+            fn.file_descriptor = open(param->fifoname, O_WRONLY);
+            if(fn.file_descriptor != -1){
+                fifo_is_closed = false;
+            }
+        }
         seconds_elapsed = time(NULL) - param->begin;
       
 	}
@@ -166,8 +172,24 @@ int main(int argc, char* argv[]){
     time_t begin = time(NULL);
     srand(time(NULL));
     
+    //argv[1] should be "-t"
+    //argv[2] should be an int
+    if(argc != 4){
+        printf("Invalid number of arguments! Usage: './c -t <no. of seconds> <public fifoname>' \n");
+        return 0;
+    }
+    if(strcmp(argv[1],"-t") != 0){
+        printf("Missing -t flag. Usage: './c -t <no. of seconds> <public fifoname>' \n");
+        return 0;
+    }
+
     int seconds_to_run = atoi(argv[2]);
-    
+
+    if(seconds_to_run <= 0){
+        printf("Time should be an integer greater than 0. Usage: './c -t <no. of seconds> <public fifoname>' \n");
+        return 0;
+    }
+
     pthread_t c0;
     
     char* fifoname = (char *) malloc(50 * sizeof(char));
@@ -185,7 +207,7 @@ int main(int argc, char* argv[]){
     pthread_join(c0,NULL);
     
 	free(fifoname);
-    //printf("Client has finished running! \n");
+    
 	return 0;
     
 }
